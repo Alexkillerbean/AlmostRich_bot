@@ -2,13 +2,17 @@
 Слой данных бота: SQLite через aiosqlite.
 
 Храним только идентификатор пользователя и служебные даты —
-никаких доходов и расходов, это живёт в приложении.
+доходы и расходы живут в приложении, здесь их нет.
 """
+from __future__ import annotations  # str | None работает на Python < 3.10
+
 import os
-import aiosqlite
 from datetime import datetime, timezone
 
-DB_PATH = os.getenv("DB_PATH", "bot.db")
+import aiosqlite
+
+# bothost (и подобные) задают DATA_DIR как постоянный том; локально — рядом с кодом.
+DB_PATH = os.path.join(os.getenv("DATA_DIR", "."), "bot.db")
 
 
 def _now() -> str:
@@ -30,7 +34,6 @@ async def init() -> None:
 
 
 async def touch_user(user_id: int, username: str | None) -> None:
-    """Зарегистрировать пользователя при первом /start."""
     now = _now()
     async with aiosqlite.connect(DB_PATH) as con:
         await con.execute(

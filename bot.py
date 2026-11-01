@@ -1,24 +1,24 @@
 """
 Бот «Почти Богат» — выдача доступа к калькулятору стоимости жизни.
 
-Порядок запуска:
-1. Скопируйте .env.example в .env и заполните значения.
+Запуск:
+1. Скопируйте .env.example в .env и заполните значения (локально).
+   На хостинге значения задаются в панели (переменные окружения).
 2. pip install -r requirements.txt
 3. python bot.py
-
-.env в репозиторий НЕ коммитить — там живёт токен.
 """
 import asyncio
 import logging
 import os
-from datetime import datetime, timezone
 from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
-from aiogram.exceptions import TelegramBadRequest
+from aiogram.exceptions import TelegramAPIError
 from aiogram.filters import Command, CommandStart
 from aiogram.types import (
+    BotCommand,
     CallbackQuery,
+    ErrorEvent,
     FSInputFile,
     InlineKeyboardButton,
     InlineKeyboardMarkup,
@@ -28,37 +28,27 @@ from aiogram.types import (
 
 from dotenv import load_dotenv
 
-load_dotenv()  # читаем .env (файл живёт только на хостинге, в git не коммитится)
+load_dotenv()  # локально читаем .env; на хостинге переменные уже в окружении
 
 import db
 
-# --- Конфигурация (из .env, файл не хранится в git) ---
-BOT_TOKEN = os.getenv("BOT_TOKEN")            # токен от @BotFather
-CHANNEL_ID = os.getenv("CHANNEL_ID")          # @username канала или -100xxxxxxxxxx
-WEB_APP_URL = os.getenv("WEB_APP_URL")          # https://... (адрес мини-аппа)
-
-logging.basicConfig(level=logging.INFO,
-                    format="%(asctime)s %(levelname)s %(name)s: %(message)s")
-
-# Диагностика конфигурации: видим длину и начало токена, чтобы сверить с .env на хостинге.
-logging.info("Конфиг: token_len=%s token_prefix=%s..., channel=%s, web_app_set=%s",
-             len(BOT_TOKEN or ""), (BOT_TOKEN or "")[:10], CHANNEL_ID, bool(WEB_APP_URL))
+# --- Конфигурация ---
+BOT_TOKEN = os.getenv("BOT_TOKEN")
+CHANNEL_ID = os.getenv("CHANNEL_ID")      # @username канала или -100xxxxxxxxxx
+WEB_APP_URL = os.getenv("WEB_APP_URL")    # https://... (мини-апп)
 
 if not BOT_TOKEN or not CHANNEL_ID or not WEB_APP_URL:
     raise RuntimeError(
         "Переменные BOT_TOKEN, CHANNEL_ID, WEB_APP_URL должны быть заданы "
-        "в .env (см. .env.example)."
+        "в окружении (см. .env.example)."
     )
 
-CHANNEL_URL = f"https://t.me/{CHANNEL_ID.lstrip('@')}"
+CHANNEL_URL = (f"https://t.me/{CHANNEL_ID.lstrip('@')}"
+               if CHANNEL_ID.startswith("@") else CHANNEL_ID)  # для числовых ID укажите ссылку-приглашение
 
 # --- Тексты ---
-SUBSCRIBE_CAPTION = (
-    "Сначала — подписка на канал. Это несложно, обещаем."
-)
-WELCOME_CAPTION = (
-    "Доступ открыт. Калькулятор уже ждёт — кнопка ниже 👇"
-)
+SUBSCRIBE_CAPTION = "Сначала — подписка на канал. Это несложно, обещаем."
+WELCOME_CAPTION = "Доступ открыт. Калькулятор уже ждёт — кнопка ниже 👇"
 HELP_TEXT = (
     "Что умею:\n"
     "• Проверяю подписку на канал и открываю доступ к калькулятору стоимости жизни.\n"
@@ -71,7 +61,6 @@ BANNERS_DIR = Path(__file__).parent / "banners"
 BANNER_SUBSCRIBE = BANNERS_DIR / "subscribe.png"
 BANNER_WELCOME = BANNERS_DIR / "welcome.png"
 
-# Кэш file_id отправленных баннеров, чтобы не грузить файл повторно.
 _banner_file_ids: dict[str, str] = {}
 
 
@@ -92,17 +81,22 @@ def _kb_open_app() -> InlineKeyboardMarkup:
 
 
 async def is_subscribed(bot: Bot, user_id: int) -> bool:
-    """True, если пользователь подписан на канал. При любой ошибке API — False."""
+    """True, если пользователь состоит в канале. Любая ошибка API -> False."""
     try:
         member = await bot.get_chat_member(chat_id=CHANNEL_ID, user_id=user_id)
-        return member.status in ("member", "administrator", "creator")
-    except TelegramBadRequest:
+        if member.status in ("member", "administrator", "creator"):
+            return True
+        # «Заглушённые» участники: status='restricted', но is_member=True
+        return member.status == "restricted" and bool(getattr(member, "is_member", False))
+    except TelegramAPIError:
         return False
 
 
-async def _send_banner(message: Message, path: Path, caption: str,
+async def _send_banner(message: Message | None, path: Path, caption: str,
                        reply_markup: InlineKeyboardMarkup) -> None:
-    """Отправить баннер с кэшированием file_id; при ошибке редактирования — новым сообщением."""
+    """Баннер с кэшированием file_id. message=None (старое сообщение) — молча выходим."""
+    if message is None:
+        return
     key = path.name
     file_id = _banner_file_ids.get(key)
     try:
@@ -114,8 +108,7 @@ async def _send_banner(message: Message, path: Path, caption: str,
                                               caption=caption,
                                               reply_markup=reply_markup)
             _banner_file_ids[key] = sent.photo[-1].file_id
-    except TelegramBadRequest:
-        # Сообщение слишком старое для редактирования или file_id протух — отправляем заново.
+    except TelegramAPIError:
         sent = await message.answer_photo(photo=FSInputFile(path),
                                           caption=caption,
                                           reply_markup=reply_markup)
@@ -123,6 +116,8 @@ async def _send_banner(message: Message, path: Path, caption: str,
 
 
 router = Router()
+router.message.filter(F.chat.type == "private")
+router.callback_query.filter(F.message.chat.type == "private")
 
 
 @router.message(CommandStart())
@@ -141,6 +136,7 @@ async def cb_check_sub(callback: CallbackQuery, bot: Bot) -> None:
     await db.update_last_seen(callback.from_user.id)
     if await is_subscribed(bot, callback.from_user.id):
         await db.mark_subscribed(callback.from_user.id)
+        await callback.answer()  # снимаем «часики» на кнопке
         await _send_banner(callback.message, BANNER_WELCOME, WELCOME_CAPTION, _kb_open_app())
     else:
         await callback.answer("Подписки пока не видно. Подпишитесь и нажмите снова.",
@@ -154,12 +150,16 @@ async def cmd_help(message: Message) -> None:
 
 
 @router.error()
-async def error_handler(event, exception) -> None:
-    logging.exception("Ошибка обработчика: %s", exception)
-    if isinstance(event, Message):
-        await event.answer(ERROR_TEXT)
-    elif isinstance(event, CallbackQuery) and event.message:
-        await event.message.answer(ERROR_TEXT)
+async def error_handler(event: ErrorEvent) -> None:
+    logging.exception("Ошибка обработчика: %s", event.exception)
+    msg = event.update.message
+    if msg is None and event.update.callback_query is not None:
+        msg = event.update.callback_query.message
+    if msg is not None:
+        try:
+            await msg.answer(ERROR_TEXT)
+        except TelegramAPIError:
+            pass
 
 
 async def main() -> None:
@@ -169,8 +169,8 @@ async def main() -> None:
 
     bot = Bot(token=BOT_TOKEN)
     await bot.set_my_commands([
-        # ("/start", "Проверить доступ к калькулятору"),
-        # ("/help", "Помощь"),
+        BotCommand(command="start", description="Проверить доступ к калькулятору"),
+        BotCommand(command="help", description="Помощь"),
     ])
 
     dp = Dispatcher()
