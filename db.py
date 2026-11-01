@@ -20,6 +20,7 @@ def _now() -> str:
 
 
 async def init() -> None:
+    os.makedirs(os.path.dirname(DB_PATH) or ".", exist_ok=True)
     async with aiosqlite.connect(DB_PATH) as con:
         await con.execute("""
             CREATE TABLE IF NOT EXISTS users (

@@ -7,6 +7,8 @@
 2. pip install -r requirements.txt
 3. python bot.py
 """
+from __future__ import annotations
+
 import asyncio
 import logging
 import os
@@ -43,8 +45,15 @@ if not BOT_TOKEN or not CHANNEL_ID or not WEB_APP_URL:
         "в окружении (см. .env.example)."
     )
 
-CHANNEL_URL = (f"https://t.me/{CHANNEL_ID.lstrip('@')}"
-               if CHANNEL_ID.startswith("@") else CHANNEL_ID)  # для числовых ID укажите ссылку-приглашение
+if CHANNEL_ID.startswith("@"):
+    CHANNEL_URL = f"https://t.me/{CHANNEL_ID.lstrip('@')}"
+elif CHANNEL_ID.startswith("http"):
+    CHANNEL_URL = CHANNEL_ID  # ссылка-приглашение для приватного канала
+else:
+    raise RuntimeError(
+        "CHANNEL_ID должен быть @username канала или ссылкой-приглашением "
+        "(https://t.me/+...). Числовой ID в кнопку подписки не подставить."
+    )
 
 # --- Тексты ---
 SUBSCRIBE_CAPTION = "Сначала — подписка на канал. Это несложно, обещаем."
