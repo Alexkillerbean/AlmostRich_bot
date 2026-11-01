@@ -1,3 +1,13 @@
+"""
+Бот «Почти Богат» — выдача доступа к калькулятору стоимости жизни.
+
+Порядок запуска:
+1. Скопируйте .env.example в .env и заполните значения.
+2. pip install -r requirements.txt
+3. python bot.py
+
+.env в репозиторий НЕ коммитить — там живёт токен.
+"""
 import asyncio
 import logging
 import os
@@ -18,10 +28,11 @@ from aiogram.types import (
 
 from dotenv import load_dotenv
 
-load_dotenv()
+load_dotenv()  # читаем .env (файл живёт только на хостинге, в git не коммитится)
 
 import db
 
+# --- Конфигурация (из .env, файл не хранится в git) ---
 BOT_TOKEN = os.getenv("BOT_TOKEN")            # токен от @BotFather
 CHANNEL_ID = os.getenv("CHANNEL_ID")          # @username канала или -100xxxxxxxxxx
 WEB_APP_URL = os.getenv("WEB_APP_URL")          # https://... (адрес мини-аппа)
