@@ -12,6 +12,7 @@ import asyncio
 import logging
 import os
 from datetime import datetime, timezone
+from pathlib import Path
 
 from aiogram import Bot, Dispatcher, F, Router
 from aiogram.exceptions import TelegramBadRequest
@@ -24,6 +25,10 @@ from aiogram.types import (
     Message,
     WebAppInfo,
 )
+
+from dotenv import load_dotenv
+
+load_dotenv()  # читаем .env (файл живёт только на хостинге, в git не коммитится)
 
 import db
 
