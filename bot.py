@@ -45,14 +45,25 @@ if not BOT_TOKEN or not CHANNEL_ID or not WEB_APP_URL:
         "в окружении (см. .env.example)."
     )
 
+# CHANNEL_ID — исключительно для get_chat_member: @username или числовой ID (-100...).
+# CHANNEL_URL — для кнопки подписки: по умолчанию из @username; для приватного
+# канала задайте её явно ссылкой-приглашением (https://t.me/+...).
+CHANNEL_URL_OVERRIDE = os.getenv("CHANNEL_URL", "").strip()
+
 if CHANNEL_ID.startswith("@"):
-    CHANNEL_URL = f"https://t.me/{CHANNEL_ID.lstrip('@')}"
-elif CHANNEL_ID.startswith("http"):
-    CHANNEL_URL = CHANNEL_ID  # ссылка-приглашение для приватного канала
+    CHANNEL_URL = CHANNEL_URL_OVERRIDE or f"https://t.me/{CHANNEL_ID.lstrip('@')}"
+elif CHANNEL_ID.startswith("-100") and CHANNEL_ID[4:].isdigit():
+    if not CHANNEL_URL_OVERRIDE:
+        raise RuntimeError(
+            "CHANNEL_ID задан числовым ID — значит канал приватный. "
+            "Добавьте переменную CHANNEL_URL со ссылкой-приглашением "
+            "(https://t.me/+...), иначе кнопки подписки не будет."
+        )
+    CHANNEL_URL = CHANNEL_URL_OVERRIDE
 else:
     raise RuntimeError(
-        "CHANNEL_ID должен быть @username канала или ссылкой-приглашением "
-        "(https://t.me/+...). Числовой ID в кнопку подписки не подставить."
+        "CHANNEL_ID должен быть @username канала или числовым ID вида -100xxxxxxxxxx. "
+        "Ссылку-приглашение сюда вставлять нельзя — проверка подписки сломается."
     )
 
 # --- Тексты ---
